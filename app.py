@@ -24,12 +24,22 @@ def make_input_group(label, input_id, value, symbol="$", step=1):
     ], className="mb-2 align-items-center")
 
 # Default Data for the Table
-default_table_data = [{
-    "id": str(uuid.uuid4()),
-    "Name": "Family of 5 (Explore)",
-    "Inspire": 0, "Believe": 0, "Explore": 5, "Imagine": 0,
-    "Vehicles": 1
-}]
+default_table_data = [
+    {
+        "id": str(uuid.uuid4()),
+        "Name": "Family of 5 (Explore)",
+        "Inspire": 0, "Believe": 0, "Explore": 5, "Imagine": 0,
+        "Vehicles": 1,
+        "MaxVisits": 20
+    },
+    {
+        "id": str(uuid.uuid4()),
+        "Name": "Family of 5",
+        "Inspire": 1, "Believe": 0, "Explore": 4, "Imagine": 0,
+        "Vehicles": 1,
+        "MaxVisits": 20
+    }
+]
 
 # UI Layout
 app.layout = dbc.Container([
@@ -109,6 +119,10 @@ app.layout = dbc.Container([
                     dbc.Row([
                         dbc.Label("Vehicles", width=5, className="small fw-bold text-muted"),
                         dbc.Col(dbc.Input(id="scen-v", type="number", value=1, min=1, step=1, size="sm"), width=7)
+                    ], className="mb-2"),
+                    dbc.Row([
+                        dbc.Label("Est. Max Visits", width=5, className="small fw-bold text-muted"),
+                        dbc.Col(dbc.Input(id="scen-max-visits", type="number", value=20, min=1, max=365, step=1, size="sm"), width=7)
                     ], className="mb-3"),
                     html.Hr(className="my-2"),
                     dbc.Row([
@@ -132,15 +146,16 @@ app.layout = dbc.Container([
                         id='scenario-table',
                         data=default_table_data,
                         columns=[
-                            {"name": "Name", "id": "Name"},
-                            {"name": "Vehicles", "id": "Vehicles"},
-                            {"name": "Inspire", "id": "Inspire"},
-                            {"name": "Believe", "id": "Believe"},
-                            {"name": "Explore", "id": "Explore"},
-                            {"name": "Imagine", "id": "Imagine"},
+                            {"name": "Name", "id": "Name", "editable": True},
+                            {"name": "Vehicles", "id": "Vehicles", "editable": True},
+                            {"name": "Inspire", "id": "Inspire", "editable": True},
+                            {"name": "Believe", "id": "Believe", "editable": True},
+                            {"name": "Explore", "id": "Explore", "editable": True},
+                            {"name": "Imagine", "id": "Imagine", "editable": True},
                             {"name": "Total Upfront", "id": "Upfront", "type": "numeric", "format": dash_table.FormatTemplate.money(0)},
                             {"name": "Breakeven", "id": "Breakeven", "type": "numeric"}
                         ],
+                        editable=True,
                         row_deletable=True,
                         style_cell={'textAlign': 'center', 'fontFamily': 'sans-serif', 'padding': '10px'},
                         style_header={'backgroundColor': '#f8f9fa', 'fontWeight': 'bold'},
@@ -178,6 +193,7 @@ def safe_val(val, default=0.0):
 
 @app.callback(
     [Output("scenario-table", "data"),
+     Output("scenario-table", "style_data_conditional"),
      Output("line-chart-group", "figure"),
      Output("kpi-cards-container", "children"),
      Output("bar-chart", "figure"),
@@ -187,28 +203,31 @@ def safe_val(val, default=0.0):
     [Input("add-scenario-btn", "n_clicks"),
      Input("scenario-table", "data_previous"),
      Input("global-ticket", "value"), Input("global-parking", "value"), Input("global-spend", "value"),
+     Input("scen-max-visits", "value"),
+     Input("line-chart-group", "relayoutData"),
      Input("inspire-cost", "value"), Input("inspire-park-disc", "value"), Input("inspire-food-disc", "value"),
      Input("believe-cost", "value"), Input("believe-park-disc", "value"), Input("believe-food-disc", "value"),
      Input("explore-cost", "value"), Input("explore-park-disc", "value"), Input("explore-food-disc", "value"),
      Input("imagine-cost", "value"), Input("imagine-park-disc", "value"), Input("imagine-food-disc", "value")],
     
     # State (Data we need to read but shouldn't trigger recalculations on their own)
-    [State("scenario-table", "data"), State("scen-name", "value"), State("scen-v", "value"), 
+    [State("scenario-table", "data"), State("scen-name", "value"), State("scen-v", "value"), State("scen-max-visits", "value"), 
      State("scen-i", "value"), State("scen-b", "value"), State("scen-e", "value"), State("scen-im", "value")]
 )
 def update_master(n_clicks, table_prev, 
-                  t_cost, p_cost, s_cost,
+                  t_cost, p_cost, s_cost, comparison_visits, relayout_data,
                   i_c, i_p, i_f,
                   b_c, b_p, b_f,
                   e_c, e_p, e_f,
                   im_c, im_p, im_f,
-                  table_data, scen_name, scen_v, scen_i, scen_b, scen_e, scen_im):
+                  table_data, scen_name, scen_v, scen_max_visits, scen_i, scen_b, scen_e, scen_im):
     
     ctx = dash.callback_context
     trigger = ctx.triggered[0]['prop_id'] if ctx.triggered else ""
 
     # Sanitize global inputs
     t_cost, p_cost, s_cost = safe_val(t_cost, 160), safe_val(p_cost, 40), safe_val(s_cost, 50)
+    comparison_visits = max(1, int(safe_val(comparison_visits, 25)))
     table_data = table_data or []
 
     # Map current tier definitions
@@ -228,14 +247,53 @@ def update_master(n_clicks, table_prev,
                 "Name": scen_name if scen_name else f"Scenario {len(table_data)+1}",
                 "Inspire": int(safe_val(scen_i)), "Believe": int(safe_val(scen_b)),
                 "Explore": int(safe_val(scen_e)), "Imagine": int(safe_val(scen_im)),
-                "Vehicles": max(1, int(safe_val(scen_v, 1)))
+                "Vehicles": max(1, int(safe_val(scen_v, 1))),
+                "MaxVisits": max(1, int(safe_val(scen_max_visits, 25)))
             }
             table_data.append(new_row)
 
     # 2. GROUP SCENARIO MATH & CHARTING
     group_fig = go.Figure()
-    visits_range = list(range(26))  # 0 to 25 visits    
+    visits_range = list(range(366))  # 0 to 365 visits
     colors = pcolors.qualitative.G10 # Color palette for scenarios
+
+    best_row_index = None
+    best_visit_cost = float('inf')
+    best_visit_line = comparison_visits
+    for idx, row in enumerate(table_data):
+        i_q = safe_val(row.get("Inspire", 0))
+        b_q = safe_val(row.get("Believe", 0))
+        e_q = safe_val(row.get("Explore", 0))
+        im_q = safe_val(row.get("Imagine", 0))
+        v_count = safe_val(row.get("Vehicles", 1))
+        group_size = i_q + b_q + e_q + im_q
+        if group_size == 0:
+            continue
+        p_discs = []
+        p_discs.extend([tiers["Inspire"]["p_disc"]] * int(i_q))
+        p_discs.extend([tiers["Believe"]["p_disc"]] * int(b_q))
+        p_discs.extend([tiers["Explore"]["p_disc"]] * int(e_q))
+        p_discs.extend([tiers["Imagine"]["p_disc"]] * int(im_q))
+        p_discs.sort(reverse=True)
+        group_pass_parking_cost = 0
+        for i in range(int(v_count)):
+            if i < len(p_discs):
+                group_pass_parking_cost += p_cost * (1 - p_discs[i])
+            else:
+                group_pass_parking_cost += p_cost
+        f_discs = []
+        if i_q > 0: f_discs.append(tiers["Inspire"]["f_disc"])
+        if b_q > 0: f_discs.append(tiers["Believe"]["f_disc"])
+        if e_q > 0: f_discs.append(tiers["Explore"]["f_disc"])
+        if im_q > 0: f_discs.append(tiers["Imagine"]["f_disc"])
+        max_f_disc = max(f_discs) if f_discs else 0
+        group_pass_per_visit = group_pass_parking_cost + (group_size * s_cost * (1 - max_f_disc))
+        total_upfront = (i_q * tiers["Inspire"]["cost"]) + (b_q * tiers["Believe"]["cost"]) + (e_q * tiers["Explore"]["cost"]) + (im_q * tiers["Imagine"]["cost"])
+        scenario_cost_at_visit = total_upfront + (comparison_visits * group_pass_per_visit)
+        if scenario_cost_at_visit < best_visit_cost:
+            best_visit_cost = scenario_cost_at_visit
+            best_row_index = idx
+            best_visit_line = comparison_visits
 
     for idx, row in enumerate(table_data):
         i_q = safe_val(row.get("Inspire", 0))
@@ -291,20 +349,92 @@ def update_master(n_clicks, table_prev,
         # Chart the lines for this scenario
         c = colors[idx % len(colors)]
         scen_name_disp = row["Name"]
-        
+        is_best = idx == best_row_index
+        line_color = 'black' if is_best else c
+        line_width = 4 if is_best else 3
+
         group_pass_costs = [total_upfront + (v * group_pass_per_visit) for v in visits_range]
 
         group_fig.add_trace(go.Scatter(
             x=visits_range, y=group_pass_costs, mode='lines+markers', 
-            name=f'{scen_name_disp}', line=dict(color=c, width=3)
+            name=f'{scen_name_disp}', line=dict(color=line_color, width=line_width),
+            marker=dict(size=7 if is_best else 6, color=line_color)
         ))
+
+    if best_row_index is not None:
+        best_scenario_name = table_data[best_row_index].get("Name", "Scenario")
+        group_fig.add_vline(
+            x=best_visit_line,
+            line_dash="dot",
+            line_color="black",
+            line_width=2,
+            annotation_text=f"Best scenario: {best_scenario_name}",
+            annotation_position="top left"
+        )
+
+    x_min, x_max = 0, 25
+    if relayout_data:
+        xaxis_range = relayout_data.get('xaxis.range')
+        if xaxis_range is not None and len(xaxis_range) == 2:
+            x_min, x_max = xaxis_range
+        else:
+            xaxis_range_0 = relayout_data.get('xaxis.range[0]')
+            xaxis_range_1 = relayout_data.get('xaxis.range[1]')
+            if xaxis_range_0 is not None and xaxis_range_1 is not None:
+                x_min, x_max = float(xaxis_range_0), float(xaxis_range_1)
+
+    visible_costs = []
+    for row in table_data:
+        i_q = safe_val(row.get("Inspire", 0))
+        b_q = safe_val(row.get("Believe", 0))
+        e_q = safe_val(row.get("Explore", 0))
+        im_q = safe_val(row.get("Imagine", 0))
+        v_count = safe_val(row.get("Vehicles", 1))
+        group_size = i_q + b_q + e_q + im_q
+        if group_size == 0:
+            continue
+        total_upfront = (i_q * tiers["Inspire"]["cost"]) + (b_q * tiers["Believe"]["cost"]) + (e_q * tiers["Explore"]["cost"]) + (im_q * tiers["Imagine"]["cost"])
+        p_discs = []
+        p_discs.extend([tiers["Inspire"]["p_disc"]] * int(i_q))
+        p_discs.extend([tiers["Believe"]["p_disc"]] * int(b_q))
+        p_discs.extend([tiers["Explore"]["p_disc"]] * int(e_q))
+        p_discs.extend([tiers["Imagine"]["p_disc"]] * int(im_q))
+        p_discs.sort(reverse=True)
+        group_pass_parking_cost = 0
+        for i in range(int(v_count)):
+            if i < len(p_discs):
+                group_pass_parking_cost += p_cost * (1 - p_discs[i])
+            else:
+                group_pass_parking_cost += p_cost
+        f_discs = []
+        if i_q > 0: f_discs.append(tiers["Inspire"]["f_disc"])
+        if b_q > 0: f_discs.append(tiers["Believe"]["f_disc"])
+        if e_q > 0: f_discs.append(tiers["Explore"]["f_disc"])
+        if im_q > 0: f_discs.append(tiers["Imagine"]["f_disc"])
+        max_f_disc = max(f_discs) if f_discs else 0
+        group_pass_per_visit = group_pass_parking_cost + (group_size * s_cost * (1 - max_f_disc))
+        visible_values = [total_upfront + (v * group_pass_per_visit) for v in range(max(0, int(math.floor(x_min))), min(365, int(math.ceil(x_max))) + 1)]
+        visible_costs.extend(visible_values)
+
+    y_upper = max(visible_costs) if visible_costs else 1
+    y_upper = max(y_upper * 1.1, 1)
 
     group_fig.update_layout(
         title="Comparison Chart: Cumulative Costs", xaxis_title="Number of Group Visits", yaxis_title="Total Cost ($)",
         template="plotly_white", hovermode="x unified", margin=dict(l=40, r=40, t=50, b=40),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(range=[0, 25] if not relayout_data else [x_min, x_max]),
+        yaxis=dict(range=[0, y_upper], rangemode='tozero')
     )
 
+    table_style = []
+    if best_row_index is not None:
+        table_style = [
+            {'if': {'row_index': best_row_index}, 'backgroundColor': '#fff3cd', 'border': '2px solid #dc3545'},
+            {'if': {'column_id': 'Name', 'row_index': best_row_index}, 'fontWeight': 'bold', 'color': '#b02a37'},
+            {'if': {'column_id': 'Upfront', 'row_index': best_row_index}, 'fontWeight': 'bold', 'color': '#b02a37'},
+            {'if': {'column_id': 'Breakeven', 'row_index': best_row_index}, 'fontWeight': 'bold', 'color': '#b02a37', 'backgroundColor': '#ffe6e6'}
+        ]
 
     # 3. INDIVIDUAL CALCULATIONS (Bottom Section)
     ind_results = []
@@ -347,7 +477,7 @@ def update_master(n_clicks, table_prev,
 
     line_fig_ind.update_layout(title="Individual Trajectory", xaxis_title="Visits", yaxis_title="Total Cost ($)", template="plotly_white", hovermode="x unified", margin=dict(l=40, r=40, t=50, b=40), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
 
-    return table_data, group_fig, kpi_cards, bar_fig, line_fig_ind
+    return table_data, table_style, group_fig, kpi_cards, bar_fig, line_fig_ind
 
 if __name__ == '__main__':
     app.run(debug=True)
