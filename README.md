@@ -1,6 +1,6 @@
 # Disneyland Magic Key Breakeven Calculator
 
-A small Dash web app for comparing Disneyland Magic Key pass costs against the cost of buying single-day tickets, parking, and food/merch for different group scenarios.
+A small Dash web app for comparing Disneyland Magic Key pass costs against the cost of buying single-day tickets, parking, and food/merch for different group scenarios. Ideal for big families trying to justify spending their life savings, and making the differences between the passes clearer.
 
 ## What it does
 
